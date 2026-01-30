@@ -16,6 +16,9 @@ class UserRole(str, enum.Enum):
 class TaskStatus(str, enum.Enum):
     TODO = "todo"; IN_PROGRESS = "in_progress"; DONE = "done"; DISPUTED = "disputed"
 
+class TaskPriority(str, enum.Enum):
+    LOW = "low"; MEDIUM = "medium"; HIGH = "high"
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -31,6 +34,7 @@ class Task(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     status = Column(Enum(TaskStatus), default=TaskStatus.TODO)
+    priority = Column(Enum(TaskPriority), default=TaskPriority.MEDIUM) # Новое поле
     dispute_reason = Column(Text, nullable=True)
     is_locked = Column(Boolean, default=False)
     creator_id = Column(Integer, ForeignKey("users.id"))

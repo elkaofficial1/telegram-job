@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from dotenv import load_dotenv
-from database import engine, async_session, Base, User, Task, Announcement, UserRole, TaskStatus
+from database import engine, async_session, Base, User, Task, Announcement, UserRole, TaskStatus, TaskPriority
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -29,7 +29,7 @@ templates = Jinja2Templates(directory="templates")
 # --- Helpers ---
 async def send_notify(tg_id: int, text: str):
     try: await bot.send_message(tg_id, text)
-    except: pass # User blocked bot or other error
+    except: pass
 
 async def broadcast_notify(db: AsyncSession, text: str):
     result = await db.execute(select(User.telegram_id))
@@ -41,9 +41,11 @@ async def broadcast_notify(db: AsyncSession, text: str):
 class InitDataSchema(BaseModel): initData: str
 class TaskCreate(BaseModel):
     title: str; description: Optional[str] = ""; assignee_id: int; deadline: Optional[datetime] = None
+    priority: TaskPriority = TaskPriority.MEDIUM
 class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None; title: Optional[str] = None; description: Optional[str] = None
     deadline: Optional[datetime] = None; dispute_reason: Optional[str] = None
+    priority: Optional[TaskPriority] = None
 class UserRoleUpdate(BaseModel): role: UserRole
 class AnnouncementCreate(BaseModel): content: str
 
@@ -97,7 +99,6 @@ async def update_user_role(user_id: int, role_data: UserRoleUpdate, request: Req
     await db.commit()
     return {"status": "ok"}
 
-# --- Tasks ---
 @app.get("/api/tasks")
 async def get_tasks(request: Request, db: AsyncSession = Depends(get_db)):
     tg_user = validate_telegram_data(request.headers.get("X-Telegram-Init-Data"), BOT_TOKEN)
@@ -113,6 +114,8 @@ async def get_tasks(request: Request, db: AsyncSession = Depends(get_db)):
             "id": t.id, "title": t.title, "description": t.description, "status": t.status,
             "deadline": t.deadline, "assignee_name": assignee.full_name if assignee else "Unknown",
             "is_mine": t.assignee_id == user.id, "is_locked": t.is_locked,
+            "priority": t.priority,
+            "created_at": t.created_at,
             "dispute_reason": t.dispute_reason if (user.role != UserRole.WORKER or t.assignee_id == user.id) else None
         })
     return tasks_data
@@ -123,15 +126,27 @@ async def create_task(task_data: TaskCreate, request: Request, db: AsyncSession 
     creator = (await db.execute(select(User).where(User.telegram_id == tg_user['id']))).scalar_one_or_none()
     if creator.role not in [UserRole.ADMIN, UserRole.OWNER]: raise HTTPException(403)
     
-    task = Task(title=task_data.title, description=task_data.description, creator_id=creator.id, assignee_id=task_data.assignee_id, deadline=task_data.deadline)
+    task = Task(
+        title=task_data.title, description=task_data.description, 
+        creator_id=creator.id, assignee_id=task_data.assignee_id, 
+        deadline=task_data.deadline, priority=task_data.priority
+    )
     db.add(task)
     await db.commit()
-    
-    # Notify Assignee
     assignee = (await db.execute(select(User).where(User.id == task_data.assignee_id))).scalar_one_or_none()
-    if assignee: asyncio.create_task(send_notify(assignee.telegram_id, f"📝 Новая задача: {task_data.title}"))
-    
+    if assignee: asyncio.create_task(send_notify(assignee.telegram_id, f"📝 Новая задача: {task_data.title}\nПриоритет: {task_data.priority.value}"))
     return {"status": "ok"}
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    tg_user = validate_telegram_data(request.headers.get("X-Telegram-Init-Data"), BOT_TOKEN)
+    user = (await db.execute(select(User).where(User.telegram_id == tg_user['id']))).scalar_one_or_none()
+    if user.role not in [UserRole.ADMIN, UserRole.OWNER]: raise HTTPException(403)
+    task = await db.get(Task, task_id)
+    if not task: raise HTTPException(404)
+    await db.delete(task)
+    await db.commit()
+    return {"status": "deleted"}
 
 @app.patch("/api/tasks/{task_id}")
 async def update_task(task_id: int, task_data: TaskUpdate, request: Request, db: AsyncSession = Depends(get_db)):
@@ -139,37 +154,29 @@ async def update_task(task_id: int, task_data: TaskUpdate, request: Request, db:
     user = (await db.execute(select(User).where(User.telegram_id == tg_user['id']))).scalar_one_or_none()
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not task: raise HTTPException(404)
-    
-    # Fetch roles involved for notification
     creator = (await db.execute(select(User).where(User.id == task.creator_id))).scalar_one_or_none()
     assignee = (await db.execute(select(User).where(User.id == task.assignee_id))).scalar_one_or_none()
-
-    is_owner = user.role == UserRole.OWNER
     
     if task_data.status == TaskStatus.DISPUTED:
         if task.assignee_id != user.id: raise HTTPException(403)
         if task.is_locked: raise HTTPException(400)
         task.status = TaskStatus.DISPUTED; task.dispute_reason = task_data.dispute_reason
-        if creator: asyncio.create_task(send_notify(creator.telegram_id, f"⚠️ Задача оспорена: {task.title}\nПричина: {task_data.dispute_reason}"))
-    
+        if creator: asyncio.create_task(send_notify(creator.telegram_id, f"⚠️ Задача оспорена: {task.title}"))
     elif task.status == TaskStatus.DISPUTED and task_data.status:
-        if not is_owner: raise HTTPException(403)
+        if user.role == UserRole.WORKER: raise HTTPException(403)
         task.status = task_data.status; task.dispute_reason = None
         if task_data.status != TaskStatus.DONE: task.is_locked = True
-        if assignee: asyncio.create_task(send_notify(assignee.telegram_id, f"🔒 Решение по спору: {task.title}\nСтатус: {task_data.status.value}"))
-    
+        if assignee: asyncio.create_task(send_notify(assignee.telegram_id, f"🔒 Решение: {task.title} -> {task_data.status.value}"))
     else:
-        # Standard Update
         if user.role == UserRole.WORKER:
             if task.assignee_id != user.id: raise HTTPException(403)
             if task_data.status:
                 task.status = task_data.status
                 if task_data.status == TaskStatus.DONE and creator:
-                    asyncio.create_task(send_notify(creator.telegram_id, f"✅ Задача выполнена: {task.title}\nПроверьте выполнение!"))
+                    asyncio.create_task(send_notify(creator.telegram_id, f"✅ Задача выполнена: {task.title}"))
         else:
             for k, v in task_data.dict(exclude_unset=True).items(): 
                  if k != 'dispute_reason': setattr(task, k, v)
-    
     await db.commit()
     return {"status": "updated"}
 
@@ -184,13 +191,21 @@ async def create_announcement(data: AnnouncementCreate, request: Request, db: As
     tg_user = validate_telegram_data(request.headers.get("X-Telegram-Init-Data"), BOT_TOKEN)
     user = (await db.execute(select(User).where(User.telegram_id == tg_user['id']))).scalar_one_or_none()
     if user.role not in [UserRole.ADMIN, UserRole.OWNER]: raise HTTPException(403)
-    
     db.add(Announcement(content=data.content, author_name=user.full_name))
     await db.commit()
-    
-    # Broadcast
-    asyncio.create_task(broadcast_notify(db, f"📢 Новое объявление:\n{data.content}"))
+    asyncio.create_task(broadcast_notify(db, f"📢 Объявление:\n{data.content}"))
     return {"status": "ok"}
+
+@app.delete("/api/announcements/{announcement_id}")
+async def delete_announcement(announcement_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    tg_user = validate_telegram_data(request.headers.get("X-Telegram-Init-Data"), BOT_TOKEN)
+    user = (await db.execute(select(User).where(User.telegram_id == tg_user['id']))).scalar_one_or_none()
+    if user.role not in [UserRole.ADMIN, UserRole.OWNER]: raise HTTPException(403)
+    announcement = await db.get(Announcement, announcement_id)
+    if not announcement: raise HTTPException(404)
+    await db.delete(announcement)
+    await db.commit()
+    return {"status": "deleted"}
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -199,7 +214,7 @@ async def cmd_start(message: types.Message):
             role = UserRole.OWNER if message.from_user.id == OWNER_ID else UserRole.WORKER
             session.add(User(telegram_id=message.from_user.id, full_name=message.from_user.full_name, role=role))
             await session.commit()
-    await message.answer("Task Manager:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Open App", web_app=WebAppInfo(url=BASE_URL))]]))
+    await message.answer("Task Manager v4.0:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚀 Открыть", web_app=WebAppInfo(url=BASE_URL))]]))
 
 async def main():
     async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)

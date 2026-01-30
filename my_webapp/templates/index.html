@@ -3,188 +3,262 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task Manager</title>
+    <title>TM 4.0</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>tailwind.config = { darkMode: 'class', theme: { extend: { colors: { tg_bg: 'var(--tg-theme-bg-color)', tg_text: 'var(--tg-theme-text-color)' } } } }</script>
-    <style> body { background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); } .card { background: var(--tg-theme-secondary-bg-color, #f5f5f5); } </style>
+    <script>tailwind.config = { darkMode: 'class', theme: { extend: { colors: { tg_bg: 'var(--tg-theme-bg-color)', tg_text: 'var(--tg-theme-text-color)', tg_hint: 'var(--tg-theme-hint-color)' } } } }</script>
+    <style> 
+        body { background: var(--tg-theme-bg-color, #f3f4f6); color: var(--tg-theme-text-color, #1f2937); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(10px); }
+        .dark .glass { background: rgba(31, 41, 55, 0.7); }
+        .priority-high { border-left: 4px solid #ef4444; }
+        .priority-medium { border-left: 4px solid #f59e0b; }
+        .priority-low { border-left: 4px solid #10b981; }
+        .anim-enter { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
 </head>
 <body class="transition-colors duration-200">
-    <div id="app" class="p-4 pb-24 max-w-md mx-auto relative min-h-screen">
-        <header class="flex justify-between items-center mb-6">
-            <h1 class="text-2xl font-bold">Tasks v3.0</h1>
-            <div class="flex gap-2 items-center">
-                <button onclick="openNewsModal()" class="text-xl p-1 relative">📢 <span id="newsDot" class="hidden absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span></button>
-                <button id="usersBtn" onclick="openUsersModal()" class="hidden px-2 py-1 bg-purple-100 text-purple-700 rounded dark:bg-purple-900 dark:text-purple-200 text-sm">👥</button>
-                <div id="userRole" class="text-sm font-medium px-2 py-1 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">...</div>
+    <div id="app" class="p-4 pb-28 max-w-md mx-auto relative min-h-screen">
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-4">
+            <div>
+                <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-600">Tasks</h1>
+                <p class="text-xs text-tg_hint" id="roleLabel">Loading...</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="toggleLang()" class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-sm">🌐</button>
+                <button onclick="openNewsModal()" class="w-8 h-8 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center relative">🔔<span id="newsDot" class="hidden absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span></button>
+                <button id="usersBtn" onclick="openUsersModal()" class="hidden w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center">👥</button>
             </div>
         </header>
-        <div id="filterContainer" class="hidden flex gap-2 mb-4">
-            <button onclick="loadTasks('all')" class="flex-1 py-2 px-4 rounded bg-gray-200 dark:bg-gray-700 text-sm">Все</button>
-            <button onclick="loadTasks('mine')" class="flex-1 py-2 px-4 rounded bg-gray-200 dark:bg-gray-700 text-sm">Мои</button>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-3 gap-2 mb-4 text-center">
+            <div class="glass p-2 rounded-xl shadow-sm"><div class="text-lg font-bold text-blue-500" id="statAll">0</div><div class="text-[10px] text-tg_hint" data-t="total">Всего</div></div>
+            <div class="glass p-2 rounded-xl shadow-sm"><div class="text-lg font-bold text-yellow-500" id="statProcess">0</div><div class="text-[10px] text-tg_hint" data-t="process">В работе</div></div>
+            <div class="glass p-2 rounded-xl shadow-sm"><div class="text-lg font-bold text-green-500" id="statDone">0</div><div class="text-[10px] text-tg_hint" data-t="done">Готово</div></div>
         </div>
-        <div id="taskList" class="space-y-3"><div class="text-center mt-10 text-gray-500">Загрузка...</div></div>
-        <button id="fab" onclick="openModal()" class="hidden fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg text-3xl pb-1">+</button>
+
+        <!-- Controls -->
+        <div class="mb-4 space-y-2">
+            <input type="text" id="searchInput" oninput="filterTasks()" placeholder="🔍 Поиск..." class="w-full p-2 rounded-xl border-none shadow-sm glass text-sm outline-none focus:ring-2 ring-blue-400">
+            <div class="flex gap-2">
+                <select id="sortSelect" onchange="filterTasks()" class="flex-1 p-2 rounded-xl border-none shadow-sm glass text-sm outline-none">
+                    <option value="newest" data-t="sort_new">📅 Сначала новые</option>
+                    <option value="priority" data-t="sort_prio">🔥 Сначала срочные</option>
+                    <option value="deadline" data-t="sort_dead">⏰ По дедлайну</option>
+                </select>
+                <button id="filterBtn" onclick="toggleMineFilter()" class="flex-1 p-2 rounded-xl shadow-sm glass text-sm font-medium active:scale-95 transition-transform" data-t="filter_all">Все</button>
+            </div>
+        </div>
+
+        <!-- List -->
+        <div id="taskList" class="space-y-3 pb-20"></div>
+
+        <!-- FAB -->
+        <button id="fab" onclick="openModal()" class="hidden fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full shadow-lg text-3xl pb-1 active:scale-90 transition-transform z-40">+</button>
     </div>
 
-    <!-- Task Modal -->
-    <div id="modal" class="fixed inset-0 bg-black/50 hidden flex items-end justify-center sm:items-center z-50 opacity-0 transition-opacity duration-300">
-        <div class="bg-white dark:bg-gray-800 w-full sm:w-96 rounded-t-2xl sm:rounded-2xl p-6 transform transition-transform duration-300 translate-y-full sm:translate-y-0" id="modalContent">
-            <h2 id="modalTitle" class="text-xl font-bold mb-4">Задача</h2>
+    <!-- Modals (Task, News, Users) -->
+    <div id="modal" class="fixed inset-0 bg-black/60 hidden flex items-end justify-center sm:items-center z-50 backdrop-blur-sm opacity-0 transition-opacity">
+        <div class="bg-white dark:bg-gray-800 w-full sm:w-96 rounded-t-3xl p-6 transition-transform translate-y-full" id="modalContent">
+            <h2 id="modalTitle" class="text-xl font-bold mb-4">Task</h2>
             <form id="taskForm" onsubmit="handleFormSubmit(event)">
-                <div class="mb-3"><label class="text-xs">Название</label><input type="text" id="inpTitle" class="w-full p-2 rounded border dark:bg-gray-700" required></div>
-                <div class="mb-3"><label class="text-xs">Описание</label><textarea id="inpDesc" class="w-full p-2 rounded border dark:bg-gray-700" rows="2"></textarea></div>
-                <div class="mb-3"><label class="text-xs">Дедлайн</label><input type="datetime-local" id="inpDeadline" class="w-full p-2 rounded border dark:bg-gray-700"></div>
-                <div id="assigneeBlock" class="mb-3 hidden"><label class="text-xs">Исполнитель</label><select id="inpAssignee" class="w-full p-2 rounded border dark:bg-gray-700"></select></div>
-                
-                <div id="statusBlock" class="mb-4 hidden">
-                    <label class="text-xs">Статус</label>
-                    <select id="inpStatus" class="w-full p-2 rounded border dark:bg-gray-700 mb-2">
-                        <option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="done">Done (На проверку)</option>
-                    </select>
+                <div class="space-y-3">
+                    <input type="text" id="inpTitle" class="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-700 outline-none" placeholder="Заголовок" required>
+                    <textarea id="inpDesc" class="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-700 outline-none" rows="2" placeholder="Описание"></textarea>
                     
-                    <div id="adminDisputeControls" class="hidden space-y-2 mt-2">
-                        <div class="p-2 bg-red-100 dark:bg-red-900 rounded text-sm mb-2"><p class="font-bold">⚠️ Спор:</p><p id="adminDisputeReason" class="italic">...</p></div>
-                        <button type="button" onclick="resolveDispute('done')" class="w-full py-2 bg-green-600 text-white rounded">✅ Принять</button>
-                        <button type="button" onclick="resolveDispute('in_progress')" class="w-full py-2 bg-gray-600 text-white rounded">🔒 Отклонить</button>
+                    <div class="flex gap-2">
+                        <div class="flex-1">
+                            <label class="text-xs ml-1 text-tg_hint" data-t="priority">Приоритет</label>
+                            <select id="inpPriority" class="w-full p-2 rounded-xl bg-gray-50 dark:bg-gray-700 outline-none text-sm">
+                                <option value="low">🟢 Low</option>
+                                <option value="medium">⚡ Medium</option>
+                                <option value="high">🔥 High</option>
+                            </select>
+                        </div>
+                        <div class="flex-1">
+                             <label class="text-xs ml-1 text-tg_hint" data-t="deadline">Дедлайн</label>
+                             <input type="datetime-local" id="inpDeadline" class="w-full p-2 rounded-xl bg-gray-50 dark:bg-gray-700 outline-none text-sm">
+                        </div>
                     </div>
 
-                    <button type="button" id="btnDispute" onclick="openDisputeInput()" class="w-full py-2 bg-red-500 text-white rounded hidden">🚩 Оспорить</button>
-                    <div id="disputeInputArea" class="hidden mt-2">
-                        <textarea id="inpDisputeReason" placeholder="Причина..." class="w-full p-2 border rounded dark:bg-gray-700 text-sm"></textarea>
-                        <button type="button" onclick="submitDispute()" class="w-full mt-1 py-1 bg-red-600 text-white rounded text-sm">Отправить</button>
+                    <div id="assigneeBlock" class="hidden">
+                        <label class="text-xs ml-1 text-tg_hint" data-t="assignee">Исполнитель</label>
+                        <select id="inpAssignee" class="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-700 outline-none"></select>
+                    </div>
+
+                    <div id="statusBlock" class="hidden">
+                         <label class="text-xs ml-1 text-tg_hint" data-t="status">Статус</label>
+                         <select id="inpStatus" class="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-700 outline-none">
+                            <option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="done">Done</option>
+                        </select>
+                        <div id="extraActions" class="mt-2 space-y-2"></div>
                     </div>
                 </div>
-
                 <div class="flex gap-2 mt-6">
-                    <button type="button" onclick="closeModal('modal')" class="flex-1 py-2 bg-gray-400/20 rounded">Закрыть</button>
-                    <button type="submit" id="btnSave" class="flex-1 py-2 bg-blue-600 text-white rounded">Сохранить</button>
+                    <button type="button" onclick="closeModal('modal')" class="flex-1 py-3 text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-xl font-medium" data-t="cancel">Отмена</button>
+                    <button type="submit" id="btnSave" class="flex-1 py-3 bg-blue-600 text-white rounded-xl font-medium shadow-lg shadow-blue-500/30" data-t="save">Сохранить</button>
                 </div>
+                <button type="button" id="btnDelete" onclick="deleteTask()" class="hidden w-full mt-2 py-2 text-red-500 text-sm font-medium">🗑 Удалить задачу</button>
             </form>
         </div>
     </div>
-
+    
     <!-- News Modal -->
-    <div id="newsModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50 opacity-0 transition-opacity duration-300">
-        <div class="bg-white dark:bg-gray-800 w-full max-w-sm rounded-2xl p-6 h-3/4 flex flex-col">
-            <h2 class="text-xl font-bold mb-4">📢 Доска объявлений</h2>
-            
-            <div id="adminNewsForm" class="hidden mb-4 border-b pb-4 dark:border-gray-600">
-                <textarea id="newsContent" placeholder="Новое объявление..." class="w-full p-2 border rounded dark:bg-gray-700 text-sm mb-2"></textarea>
-                <button onclick="postNews()" class="w-full py-1 bg-blue-600 text-white rounded text-sm">Опубликовать</button>
-            </div>
-
+    <div id="newsModal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-6 h-3/4 flex flex-col m-4 shadow-2xl">
+            <h2 class="text-xl font-bold mb-4" data-t="news">Новости</h2>
+            <div id="adminNewsForm" class="hidden mb-4"><textarea id="newsContent" class="w-full p-2 rounded-xl bg-gray-50 dark:bg-gray-700 text-sm mb-2" placeholder="Text..."></textarea><button onclick="postNews()" class="w-full py-2 bg-blue-600 text-white rounded-xl text-sm">Post</button></div>
             <div id="newsList" class="flex-1 overflow-y-auto space-y-3"></div>
-            <button onclick="closeModal('newsModal')" class="mt-4 w-full py-2 bg-gray-400/20 rounded">Закрыть</button>
+            <button onclick="closeModal('newsModal')" class="mt-4 w-full py-3 bg-gray-100 dark:bg-gray-700 rounded-xl font-medium" data-t="close">Закрыть</button>
         </div>
     </div>
-
+    
     <!-- Users Modal -->
-    <div id="usersModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 w-80 rounded-2xl p-6">
-            <h2 class="text-xl font-bold mb-4">Роли</h2>
+    <div id="usersModal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white dark:bg-gray-800 w-80 rounded-3xl p-6 shadow-2xl">
+            <h2 class="text-xl font-bold mb-4" data-t="roles">Роли</h2>
             <div id="usersListContent" class="space-y-2 max-h-96 overflow-y-auto"></div>
-            <button onclick="closeModal('usersModal')" class="mt-4 w-full py-2 bg-gray-400/20 rounded">Закрыть</button>
+            <button onclick="closeModal('usersModal')" class="mt-4 w-full py-3 bg-gray-100 dark:bg-gray-700 rounded-xl" data-t="close">Закрыть</button>
         </div>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp; tg.expand();
-        if (tg.colorScheme === 'dark') document.documentElement.classList.add('dark');
+        if(tg.colorScheme==='dark') document.documentElement.classList.add('dark');
         const getHeaders = () => ({ 'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg.initData });
         
-        let currentUser = null, usersList = [], allTasks = [], isModalOpen = false;
+        // I18n System
+        let lang = 'ru';
+        const dict = {
+            ru: { total:'Всего', process:'В работе', done:'Готово', filter_all:'Все', filter_mine:'Мои', news:'Новости', roles:'Роли', save:'Сохранить', cancel:'Отмена', close:'Закрыть', priority:'Приоритет', deadline:'Дедлайн', assignee:'Исполнитель', status:'Статус', sort_new:'📅 Новые', sort_prio:'🔥 Срочные', sort_dead:'⏰ Дедлайн' },
+            en: { total:'Total', process:'In Progress', done:'Done', filter_all:'All', filter_mine:'Mine', news:'News', roles:'Roles', save:'Save', cancel:'Cancel', close:'Close', priority:'Priority', deadline:'Deadline', assignee:'Assignee', status:'Status', sort_new:'📅 Newest', sort_prio:'🔥 Priority', sort_dead:'⏰ Deadline' }
+        };
+        function t(k) { return dict[lang][k] || k; }
+        function toggleLang() { lang = lang==='ru'?'en':'ru'; updateTexts(); }
+        function updateTexts() { document.querySelectorAll('[data-t]').forEach(el => el.innerText = t(el.getAttribute('data-t'))); }
+
+        let currentUser=null, usersList=[], allTasks=[], currentEditingId=null, filterMode='all';
 
         async function init() {
             try {
-                const res = await fetch('/api/auth', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ initData: tg.initData }) });
+                const res = await fetch('/api/auth', { method:'POST', headers: getHeaders(), body: JSON.stringify({ initData: tg.initData }) });
                 currentUser = (await res.json()).user;
-                document.getElementById('userRole').innerText = currentUser.role.toUpperCase();
-                if (currentUser.role === 'owner') document.getElementById('usersBtn').classList.remove('hidden');
-                if (['admin', 'owner'].includes(currentUser.role)) { 
-                    document.getElementById('fab').classList.remove('hidden'); 
-                    document.getElementById('filterContainer').classList.remove('hidden');
+                document.getElementById('roleLabel').innerText = currentUser.full_name + ' • ' + currentUser.role.toUpperCase();
+                
+                if(currentUser.role==='owner') document.getElementById('usersBtn').classList.remove('hidden');
+                if(['admin','owner'].includes(currentUser.role)) {
+                    document.getElementById('fab').classList.remove('hidden');
                     document.getElementById('adminNewsForm').classList.remove('hidden');
                 }
-                await loadUsers(); await loadTasks();
-                setInterval(() => { if (!isModalOpen && !document.hidden) loadTasks(); }, 3000);
-            } catch (e) { document.body.innerText = "Error auth: " + e.message; }
+                await loadUsers(); await loadTasks(); updateTexts();
+                setInterval(() => { if(!currentEditingId && !document.hidden) loadTasks(true); }, 4000);
+            } catch(e) { document.body.innerHTML = `<div class="p-5 text-red-500">Auth Error. Restart bot.</div>`; }
         }
 
-        async function loadUsers() { 
-            usersList = await (await fetch('/api/users', { headers: getHeaders() })).json(); 
-            document.getElementById('inpAssignee').innerHTML = usersList.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('');
-            renderUsersModal();
+        async function loadUsers() { usersList = await (await fetch('/api/users', { headers: getHeaders() })).json(); document.getElementById('inpAssignee').innerHTML = usersList.map(u => `<option value="${u.id}">${u.full_name}</option>`).join(''); renderUsersModal(); }
+
+        async function loadTasks(silent=false) {
+            const res = await fetch('/api/tasks', { headers: getHeaders() });
+            allTasks = await res.json();
+            updateStats(); filterTasks();
         }
 
-        async function loadTasks(filter = 'all') {
-            const url = filter === 'mine' ? '/api/tasks?filter=mine' : '/api/tasks';
-            allTasks = await (await fetch(url, { headers: getHeaders() })).json();
+        function updateStats() {
+            document.getElementById('statAll').innerText = allTasks.length;
+            document.getElementById('statProcess').innerText = allTasks.filter(t=>t.status==='in_progress').length;
+            document.getElementById('statDone').innerText = allTasks.filter(t=>t.status==='done').length;
+        }
+
+        function filterTasks() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const sort = document.getElementById('sortSelect').value;
+            
+            let filtered = allTasks.filter(t => {
+                const matchSearch = t.title.toLowerCase().includes(search);
+                const matchMine = filterMode === 'mine' ? t.is_mine : true;
+                return matchSearch && matchMine;
+            });
+
+            // Sorting
+            filtered.sort((a,b) => {
+                if(sort === 'newest') return new Date(b.created_at) - new Date(a.created_at);
+                if(sort === 'deadline') return (new Date(a.deadline||'2099') - new Date(b.deadline||'2099'));
+                if(sort === 'priority') {
+                    const map = { high:3, medium:2, low:1 };
+                    return map[b.priority] - map[a.priority];
+                }
+            });
+
             const list = document.getElementById('taskList');
-            if(!allTasks.length) { list.innerHTML = '<div class="text-center mt-10">Нет задач</div>'; return; }
-            list.innerHTML = allTasks.map(t => {
-                const isLate = t.deadline && new Date(t.deadline) < new Date() && t.status !== 'done';
-                const dateColor = isLate ? 'text-red-500 font-bold' : '';
-                const lockIcon = t.is_locked ? '🔒' : '';
-                const disputeBorder = t.status === 'disputed' ? 'border-2 border-red-500' : 'border border-transparent';
-                return `<div onclick="openEdit(${t.id})" class="card p-4 rounded-xl shadow-sm mb-2 cursor-pointer ${disputeBorder}"><div class="flex justify-between items-start"><h3 class="font-bold flex-1">${lockIcon} ${t.title}</h3><span class="text-xs px-2 py-1 bg-gray-200 dark:bg-gray-600 rounded whitespace-nowrap">${t.status.replace('_',' ')}</span></div><div class="text-xs mt-2 flex justify-between text-gray-500"><span>👤 ${t.assignee_name}</span><span class="${dateColor}">📅 ${t.deadline ? t.deadline.slice(0,16).replace('T', ' ') : '-'}</span></div></div>`;
-            }).join('');
+            list.innerHTML = filtered.map(task => renderTask(task)).join('');
         }
 
-        // News
-        async function openNewsModal() {
-            toggleModal('newsModal', true);
-            const res = await fetch('/api/announcements', { headers: getHeaders() });
-            const news = await res.json();
-            document.getElementById('newsList').innerHTML = news.map(n => 
-                `<div class="bg-gray-100 dark:bg-gray-700 p-3 rounded"><div class="text-xs text-gray-500 flex justify-between"><span>${n.author_name}</span><span>${n.created_at.slice(0,10)}</span></div><p class="mt-1 text-sm whitespace-pre-wrap">${n.content}</p></div>`
-            ).join('');
-        }
-        async function postNews() {
-            const content = document.getElementById('newsContent').value;
-            if(!content) return;
-            await fetch('/api/announcements', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ content }) });
-            document.getElementById('newsContent').value = '';
-            openNewsModal();
+        function renderTask(t) {
+            const isLate = t.deadline && new Date(t.deadline) < new Date() && t.status !== 'done';
+            const lock = t.is_locked ? '🔒' : '';
+            const disputeClass = t.status === 'disputed' ? 'ring-2 ring-red-500' : '';
+            
+            return `
+            <div onclick="openEdit(${t.id})" class="anim-enter glass p-4 rounded-2xl shadow-sm border border-white/20 mb-2 cursor-pointer priority-${t.priority} ${disputeClass} relative overflow-hidden group">
+                <div class="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                <div class="flex justify-between items-start relative z-10">
+                    <h3 class="font-bold text-lg leading-tight flex-1 mr-2">${lock} ${t.title}</h3>
+                    <span class="text-[10px] uppercase font-bold px-2 py-1 bg-black/5 dark:bg-white/10 rounded-lg tracking-wider">${t.status.replace('_',' ')}</span>
+                </div>
+                <div class="mt-2 flex justify-between items-end text-xs text-tg_hint relative z-10">
+                    <div class="flex flex-col">
+                        <span>👤 ${t.assignee_name.split(' ')[0]}</span>
+                        <span class="${isLate?'text-red-500 font-bold':''}">${t.deadline ? '📅 '+t.deadline.slice(5,16).replace('T',' ') : ''}</span>
+                    </div>
+                </div>
+            </div>`;
         }
 
+        function toggleMineFilter() {
+            const btn = document.getElementById('filterBtn');
+            if(filterMode === 'all') { filterMode = 'mine'; btn.innerText = t('filter_mine'); btn.classList.add('bg-blue-100','text-blue-600'); }
+            else { filterMode = 'all'; btn.innerText = t('filter_all'); btn.classList.remove('bg-blue-100','text-blue-600'); }
+            filterTasks();
+        }
+
+        // --- Modals Logic ---
         function openModal() {
             currentEditingId = null; document.getElementById('taskForm').reset();
-            document.getElementById('modalTitle').innerText = "Новая задача";
+            document.getElementById('modalTitle').innerText = t('new_task') || "New Task";
             setupModalUI(true, false); toggleModal('modal', true);
         }
 
         function openEdit(id) {
             currentEditingId = id; const t = allTasks.find(x => x.id === id); if(!t) return;
             document.getElementById('modalTitle').innerText = t.title;
-            document.getElementById('inpTitle').value = t.title; document.getElementById('inpDesc').value = t.description || "";
-            document.getElementById('inpStatus').value = t.status;
+            document.getElementById('inpTitle').value = t.title; document.getElementById('inpDesc').value = t.description||"";
+            document.getElementById('inpStatus').value = t.status; document.getElementById('inpPriority').value = t.priority;
             if(t.deadline) document.getElementById('inpDeadline').value = t.deadline.slice(0,16);
             
-            const isOwner = currentUser.role === 'owner';
-            const isDisputed = t.status === 'disputed';
+            // Logic & Permissions
+            const isOwner = currentUser.role==='owner', isWorker = currentUser.role==='worker';
             setupModalUI(false, t.is_locked);
 
-            document.getElementById('adminDisputeControls').classList.add('hidden');
-            document.getElementById('btnDispute').classList.add('hidden');
-            document.getElementById('disputeInputArea').classList.add('hidden');
-            document.getElementById('btnSave').classList.remove('hidden');
+            const extra = document.getElementById('extraActions'); extra.innerHTML = '';
+            
+            // Delete button logic
+            const delBtn = document.getElementById('btnDelete');
+            if(['admin','owner'].includes(currentUser.role)) delBtn.classList.remove('hidden'); else delBtn.classList.add('hidden');
 
-            if (isDisputed) {
-                if (isOwner) {
-                    document.getElementById('adminDisputeControls').classList.remove('hidden');
-                    document.getElementById('adminDisputeReason').innerText = t.dispute_reason;
+            // Dispute Logic
+            if(t.status === 'disputed') {
+                extra.innerHTML = `<div class="p-2 bg-red-100 dark:bg-red-900 rounded text-xs mb-2">⚠️ ${t.dispute_reason}</div>`;
+                if(['admin','owner'].includes(currentUser.role)) {
+                    extra.innerHTML += `<div class="grid grid-cols-2 gap-2"><button type="button" onclick="resolve('done')" class="py-2 bg-green-500 text-white rounded-lg text-xs">Accept</button><button type="button" onclick="resolve('in_progress')" class="py-2 bg-gray-500 text-white rounded-lg text-xs">Reject</button></div>`;
                     document.getElementById('btnSave').classList.add('hidden');
-                    document.getElementById('inpStatus').disabled = true;
-                } else {
-                    document.getElementById('btnSave').classList.add('hidden');
-                    document.getElementById('inpStatus').disabled = true;
-                }
-            } else {
-                if (currentUser.role === 'worker' && t.is_mine && !t.is_locked && t.status !== 'done') {
-                    document.getElementById('btnDispute').classList.remove('hidden');
-                }
+                } else document.getElementById('btnSave').classList.add('hidden');
+            } else if (isWorker && t.is_mine && !t.is_locked && t.status!=='done') {
+                extra.innerHTML = `<button type="button" onclick="askDispute()" class="w-full py-2 bg-red-100 text-red-600 rounded-lg text-xs font-bold">🚩 Dispute</button>`;
             }
+
             toggleModal('modal', true);
         }
 
@@ -192,43 +266,66 @@
             const isAdmin = ['admin', 'owner'].includes(currentUser.role);
             document.getElementById('statusBlock').classList.toggle('hidden', isNew);
             document.getElementById('assigneeBlock').classList.toggle('hidden', !isAdmin);
-            ['inpTitle', 'inpDesc', 'inpDeadline'].forEach(id => document.getElementById(id).disabled = (!isAdmin && !isNew) || isLocked);
-            document.getElementById('inpAssignee').disabled = !isAdmin && !isNew;
-            document.getElementById('inpStatus').disabled = false; 
+            ['inpTitle', 'inpDesc', 'inpDeadline', 'inpPriority', 'inpAssignee'].forEach(id => document.getElementById(id).disabled = (!isAdmin && !isNew) || isLocked);
+            document.getElementById('inpStatus').disabled = false;
+            document.getElementById('btnSave').classList.remove('hidden');
+            document.getElementById('btnDelete').classList.add('hidden');
         }
 
-        function openDisputeInput() { document.getElementById('btnDispute').classList.add('hidden'); document.getElementById('disputeInputArea').classList.remove('hidden'); document.getElementById('btnSave').classList.add('hidden'); }
-        async function submitDispute() {
-            const r = document.getElementById('inpDisputeReason').value; if(!r) return;
-            await fetch(`/api/tasks/${currentEditingId}`, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify({ status: 'disputed', dispute_reason: r }) });
+        async function deleteTask() {
+            if(!confirm("Delete task?")) return;
+            await fetch(`/api/tasks/${currentEditingId}`, { method: 'DELETE', headers: getHeaders() });
             closeModal('modal'); loadTasks();
         }
-        async function resolveDispute(s) { await fetch(`/api/tasks/${currentEditingId}`, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify({ status: s }) }); closeModal('modal'); loadTasks(); }
+
+        function askDispute() {
+            const reason = prompt("Причина / Reason:");
+            if(reason) apiPatch({ status:'disputed', dispute_reason: reason });
+        }
+        function resolve(s) { apiPatch({ status: s }); }
+        
+        async function apiPatch(body) {
+            await fetch(`/api/tasks/${currentEditingId}`, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify(body) });
+            closeModal('modal'); loadTasks();
+        }
 
         window.handleFormSubmit = async (e) => {
             e.preventDefault();
-            const dVal = document.getElementById('inpDeadline').value;
             const body = {
                 title: document.getElementById('inpTitle').value, description: document.getElementById('inpDesc').value,
-                deadline: dVal ? dVal : null, assignee_id: parseInt(document.getElementById('inpAssignee').value),
-                status: document.getElementById('inpStatus').value
+                deadline: document.getElementById('inpDeadline').value || null, assignee_id: parseInt(document.getElementById('inpAssignee').value),
+                status: document.getElementById('inpStatus').value, priority: document.getElementById('inpPriority').value
             };
             const url = currentEditingId ? `/api/tasks/${currentEditingId}` : '/api/tasks';
-            const res = await fetch(url, { method: currentEditingId ? 'PATCH' : 'POST', headers: getHeaders(), body: JSON.stringify(body) });
-            if(res.ok) { closeModal('modal'); loadTasks(); } else alert("Ошибка");
+            const method = currentEditingId ? 'PATCH' : 'POST';
+            await fetch(url, { method, headers: getHeaders(), body: JSON.stringify(body) });
+            closeModal('modal'); loadTasks();
         }
 
-        function openUsersModal() { renderUsersModal(); toggleModal('usersModal', true); }
-        function renderUsersModal() { document.getElementById('usersListContent').innerHTML = usersList.map(u => u.role==='owner'?'':`<div class="flex justify-between items-center bg-gray-100 dark:bg-gray-700 p-2 rounded mb-2"><div class="text-sm truncate w-24">${u.full_name}</div><select onchange="changeRole(${u.id}, this.value)" class="text-xs p-1 rounded border dark:bg-gray-600"><option value="worker" ${u.role==='worker'?'selected':''}>Worker</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></div>`).join(''); }
-        async function changeRole(uid, r) { await fetch(`/api/users/${uid}/role`, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify({ role: r }) }); await loadUsers(); }
-        
+        // --- Modals Generic ---
         function toggleModal(id, show) {
             const m = document.getElementById(id);
-            if(show) { m.classList.remove('hidden'); setTimeout(() => m.classList.remove('opacity-0'), 10); if(id==='modal') isModalOpen=true; } 
-            else { m.classList.add('opacity-0'); setTimeout(() => m.classList.add('hidden'), 300); if(id==='modal') isModalOpen=false; }
-            if(id === 'modal') document.getElementById('modalContent').classList.toggle('translate-y-full', !show);
+            if(show) { m.classList.remove('hidden'); setTimeout(()=>m.classList.remove('opacity-0'),10); if(id==='modal') document.getElementById('modalContent').classList.remove('translate-y-full'); }
+            else { m.classList.add('opacity-0'); if(id==='modal') document.getElementById('modalContent').classList.add('translate-y-full'); setTimeout(()=>m.classList.add('hidden'),300); }
         }
         window.closeModal = (id) => toggleModal(id, false);
+
+        // --- News & Users ---
+        async function openNewsModal() {
+            toggleModal('newsModal', true);
+            const news = await (await fetch('/api/announcements', { headers: getHeaders() })).json();
+            const isAdmin = ['admin','owner'].includes(currentUser.role);
+            document.getElementById('newsList').innerHTML = news.map(n => 
+                `<div class="bg-gray-100 dark:bg-gray-700 p-3 rounded-xl"><div class="text-xs text-gray-400 flex justify-between"><span>${n.author_name}</span><span>${isAdmin?`<button onclick="delNews(${n.id})">🗑</button>`:''}</span></div><p class="text-sm mt-1">${n.content}</p></div>`
+            ).join('');
+        }
+        async function postNews() { const c = document.getElementById('newsContent').value; if(c) { await fetch('/api/announcements', { method:'POST', headers: getHeaders(), body: JSON.stringify({content:c}) }); document.getElementById('newsContent').value=''; openNewsModal(); } }
+        async function delNews(id) { if(confirm('Del?')) { await fetch(`/api/announcements/${id}`, { method:'DELETE', headers: getHeaders() }); openNewsModal(); } }
+        
+        function openUsersModal() { renderUsersModal(); toggleModal('usersModal', true); }
+        function renderUsersModal() { document.getElementById('usersListContent').innerHTML = usersList.map(u => u.role==='owner'?'':`<div class="flex justify-between items-center bg-gray-50 dark:bg-gray-700 p-2 rounded-xl mb-1"><span class="text-sm">${u.full_name}</span><select onchange="changeRole(${u.id},this.value)" class="text-xs p-1 rounded bg-white dark:bg-gray-600"><option value="worker" ${u.role==='worker'?'selected':''}>Worker</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></div>`).join(''); }
+        async function changeRole(uid, r) { await fetch(`/api/users/${uid}/role`, { method:'PATCH', headers: getHeaders(), body: JSON.stringify({role:r}) }); loadUsers(); }
+
         init();
     </script>
 </body>
